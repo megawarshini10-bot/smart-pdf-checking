@@ -2,698 +2,336 @@ import streamlit as st
 from pypdf import PdfReader
 from gtts import gTTS
 from io import BytesIO
-from datetime import datetime
 import re
-import html
-import base64
-import streamlit.components.v1 as components
-
-# =========================
-# PAGE SETTINGS
-# =========================
 
 st.set_page_config(
-    page_title="VocaPDF",
-    page_icon="🎧",
+    page_title="VocaPDF - PDF to Voice",
+    page_icon="📄",
     layout="wide"
 )
 
-# =========================
-# SESSION STATE
-# =========================
-
-defaults = {
-    "logged_in": False,
-    "username": "",
-    "pages": [],
-    "pdf_name": "",
-    "audio": None,
-    "history": [],
-    "summary": ""
-}
-
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
-
-# =========================
-# ATTRACTIVE DESIGN
-# =========================
+# -------------------- DESIGN --------------------
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Poppins', sans-serif;
-}
-
 .stApp {
-    background: linear-gradient(135deg,#f5f0ff,#edf7ff,#fff0f7);
+    background: linear-gradient(135deg, #eef2ff, #f5f3ff);
 }
-
-.block-container {
-    max-width: 1200px;
-    padding-top: 2rem;
-}
-
-.hero {
-    background: linear-gradient(120deg,#6157f5,#a44dff,#ef65c5);
-    padding: 35px;
-    border-radius: 25px;
-    color: white;
-    margin-bottom: 25px;
-    box-shadow: 0 10px 30px #b8a7ee66;
-}
-
-.hero h1 {
-    color: white;
+.main-title {
+    text-align: center;
+    color: #3730a3;
     font-size: 38px;
-    font-weight: 800;
+    font-weight: bold;
 }
-
-.card {
-    background: white;
-    border: 1px solid #e5dcff;
-    padding: 23px;
-    border-radius: 20px;
-    margin-bottom: 15px;
-    box-shadow: 0 6px 20px #8c7ac51c;
+.sub-title {
+    text-align: center;
+    color: #475569;
+    font-size: 17px;
 }
-
-.card h3 {
-    color: #6651d9;
-}
-
-.stButton > button {
-    background: linear-gradient(100deg,#6658f5,#bd54e8);
+div.stButton > button {
+    background-color: #4f46e5;
     color: white;
+    border-radius: 8px;
     border: none;
-    border-radius: 12px;
-    font-weight: 600;
-    min-height: 42px;
+    padding: 10px 20px;
+    font-weight: bold;
 }
-
-.stButton > button:hover {
+div.stButton > button:hover {
+    background-color: #3730a3;
     color: white;
-    border: 1px solid #a78bfa;
-}
-
-div[data-testid="stSidebar"] {
-    background: linear-gradient(180deg,#eae6ff,#fff0fa);
 }
 </style>
 """, unsafe_allow_html=True)
 
+# -------------------- SESSION STATE --------------------
 
-# =========================
-# PDF FUNCTIONS
-# =========================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-def read_pdf(uploaded_file):
-    reader = PdfReader(uploaded_file)
-    return [page.extract_text() or "" for page in reader.pages]
+if "pdf_text" not in st.session_state:
+    st.session_state.pdf_text = ""
 
+if "audio_data" not in st.session_state:
+    st.session_state.audio_data = None
 
-def create_audio(text, language):
-    text = text.strip()
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-    if not text:
-        raise ValueError("PDF text is empty.")
+# -------------------- LOGIN PAGE --------------------
 
-    output = BytesIO()
+if not st.session_state.logged_in:
+    st.markdown(
+        '<div class="main-title">VocaPDF</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        '<div class="sub-title">PDF Reading and Voice Converter</div>',
+        unsafe_allow_html=True
+    )
 
-    tts = gTTS(text=text, lang=language)
-    tts.write_to_fp(output)
+    st.write("")
+    st.write("")
 
-    return output.getvalue()
+    _, login_col, _ = st.columns([1, 1.2, 1])
 
+    with login_col:
+        st.subheader("Login")
 
-def create_summary(text, number=5):
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
-    return " ".join(sentences[:number])
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
 
-
-def show_audio(audio_bytes, filename):
-    encoded = base64.b64encode(audio_bytes).decode("utf-8")
-    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", filename)
-
-    player = f"""
-    <div style="
-        background:linear-gradient(135deg,#eee8ff,#fff0fa);
-        padding:22px;
-        border-radius:20px;
-        font-family:Arial;
-        border:1px solid #d9ccff;
-    ">
-        <h3 style="color:#6552d5;">🎧 Audio Studio</h3>
-
-        <audio id="player" controls style="width:100%;">
-            <source src="data:audio/mpeg;base64,{encoded}"
-                    type="audio/mpeg">
-        </audio>
-
-        <br><br>
-
-        <label style="color:#6552d5;font-weight:bold;">
-            🔊 Volume
-        </label>
-
-        <input type="range" min="0" max="100" value="100"
-            style="width:100%;"
-            oninput="document.getElementById('player').volume=this.value/100">
-
-        <br><br>
-
-        <label style="color:#6552d5;font-weight:bold;">
-            ⏩ Speed
-        </label>
-
-        <select onchange="document.getElementById('player').playbackRate=this.value"
-            style="padding:8px;border-radius:8px;">
-            <option value="0.5">0.5x</option>
-            <option value="0.75">0.75x</option>
-            <option value="1" selected>1x Normal</option>
-            <option value="1.25">1.25x</option>
-            <option value="1.5">1.5x</option>
-            <option value="2">2x</option>
-        </select>
-
-        <br><br>
-
-        <a download="{html.escape(safe_name, quote=True)}"
-           href="data:audio/mpeg;base64,{encoded}"
-           style="
-              display:inline-block;
-              background:linear-gradient(100deg,#6558f5,#bd54e8);
-              color:white;
-              padding:11px 17px;
-              border-radius:10px;
-              text-decoration:none;
-              font-weight:bold;">
-           📥 Download Audio
-        </a>
-    </div>
-    """
-
-    components.html(player, height=340)
-
-
-# =========================
-# LOGIN PAGE
-# =========================
-
-def login_page():
-    left, right = st.columns([1.2, 1])
-
-    with left:
-        st.markdown("""
-        <div class="hero">
-            <div style="font-size:60px;">🎧📚</div>
-            <h1>VocaPDF</h1>
-            <h3 style="color:white;">Your Smart PDF Voice Assistant</h3>
-            <p>✨ Read your PDFs</p>
-            <p>🎙️ Listen to your documents</p>
-            <p>🔍 Find important words</p>
-            <p>💜 Enjoy a colourful workspace</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with right:
-        st.markdown("""
-        <div class="card">
-            <h2>💜 Welcome Back!</h2>
-            <p>Login to your personal workspace.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        with st.form("login_form"):
-            username = st.text_input("👤 Username")
-            password = st.text_input("🔒 Password", type="password")
-            submitted = st.form_submit_button(
-                "✨ Login",
-                use_container_width=True
-            )
-
-        if submitted:
+        if st.button("Login", use_container_width=True):
             if username == "student" and password == "pdf123":
                 st.session_state.logged_in = True
-                st.session_state.username = username
                 st.rerun()
             else:
                 st.error("Incorrect username or password.")
 
-        st.info("Demo Username: student")
-        st.info("Demo Password: pdf123")
+        st.caption("Demo username: student")
+        st.caption("Demo password: pdf123")
 
+    st.stop()
 
-# =========================
-# MAIN DASHBOARD
-# =========================
+# -------------------- SIDEBAR --------------------
 
-def dashboard():
-    with st.sidebar:
-        st.markdown("# 🎧 VocaPDF")
-        st.markdown(f"### Hi, {st.session_state.username}! 👋")
+st.sidebar.title("VocaPDF Menu")
 
-        page = st.radio(
-            "MENU",
-            [
-                "🏠 Dashboard",
-                "📄 PDF Reader",
-                "🔍 Word Finder",
-                "🎙️ PDF to Voice",
-                "📝 PDF Summary",
-                "🕘 History"
-            ]
+page = st.sidebar.radio(
+    "Select a page",
+    [
+        "Dashboard",
+        "PDF to Voice",
+        "PDF Reader",
+        "Text Search",
+        "History"
+    ]
+)
+
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.session_state.pdf_text = ""
+    st.session_state.audio_data = None
+    st.rerun()
+
+# -------------------- DASHBOARD --------------------
+
+if page == "Dashboard":
+    st.markdown(
+        '<div class="main-title">VocaPDF Dashboard</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="sub-title">Read your PDF and listen to it as audio.</div>',
+        unsafe_allow_html=True
+    )
+
+    st.write("")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("PDF Loaded", "Yes" if st.session_state.pdf_text else "No")
+
+    with col2:
+        st.metric(
+            "Words Extracted",
+            len(st.session_state.pdf_text.split())
         )
 
-        st.markdown("---")
+    with col3:
+        st.metric("Audio Created", "Yes" if st.session_state.audio_data else "No")
 
-        if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.rerun()
+    st.info("Open PDF to Voice from the menu to upload a PDF and generate audio.")
 
-    # =========================
-    # HOME
-    # =========================
+# -------------------- PDF TO VOICE --------------------
 
-    if page == "🏠 Dashboard":
-        st.markdown("""
-        <div class="hero">
-            <h1>Welcome to VocaPDF! 💜</h1>
-            <p>Your documents. Your voice. Your experience.</p>
-        </div>
-        """, unsafe_allow_html=True)
+elif page == "PDF to Voice":
+    st.title("PDF to Voice Converter")
+    st.write("Upload a PDF, extract its text, and generate an audio file.")
 
-        col1, col2, col3 = st.columns(3)
+    uploaded_file = st.file_uploader(
+        "Choose a PDF file",
+        type=["pdf"]
+    )
+
+    if uploaded_file is not None:
+        if st.button("Extract PDF Text"):
+            try:
+                reader = PdfReader(uploaded_file)
+
+                extracted_text = []
+
+                for page_number, pdf_page in enumerate(reader.pages):
+                    page_text = pdf_page.extract_text() or ""
+                    if page_text.strip():
+                        extracted_text.append(page_text)
+
+                full_text = "\n".join(extracted_text).strip()
+
+                if full_text:
+                    st.session_state.pdf_text = full_text
+                    st.session_state.audio_data = None
+                    st.success("PDF text extracted successfully.")
+                else:
+                    st.error(
+                        "No readable text found. This PDF may contain scanned images."
+                    )
+
+            except Exception as error:
+                st.error("Could not read this PDF.")
+                st.code(str(error))
+
+    if st.session_state.pdf_text:
+        st.subheader("Extracted Text")
+
+        st.text_area(
+            "PDF content",
+            value=st.session_state.pdf_text,
+            height=220
+        )
+
+        col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("""
-            <div class="card">
-                <h3>📄 PDF Reader</h3>
-                <p>Read your PDF document page by page.</p>
-            </div>
-            """, unsafe_allow_html=True)
+            language = st.selectbox(
+                "Choose voice language",
+                options=[
+                    "English",
+                    "Tamil",
+                    "Hindi",
+                    "Telugu",
+                    "Malayalam"
+                ]
+            )
 
         with col2:
-            st.markdown("""
-            <div class="card">
-                <h3>🔍 Word Finder</h3>
-                <p>Search for words inside your document.</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col3:
-            st.markdown("""
-            <div class="card">
-                <h3>🎙️ Voice Studio</h3>
-                <p>Convert readable PDF text into audio.</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        uploaded = st.file_uploader(
-            "📂 Upload your PDF",
-            type=["pdf"],
-            key="home_upload"
-        )
-
-        if uploaded and st.button("Load PDF"):
-            try:
-                with st.spinner("Reading PDF..."):
-                    st.session_state.pages = read_pdf(uploaded)
-                    st.session_state.pdf_name = uploaded.name
-                    st.session_state.audio = None
-
-                st.success("PDF loaded successfully!")
-                st.rerun()
-
-            except Exception as error:
-                st.error(f"Unable to read PDF: {error}")
-
-    # =========================
-    # PDF READER
-    # =========================
-
-    elif page == "📄 PDF Reader":
-        st.markdown("""
-        <div class="hero">
-            <h1>📖 PDF Reader</h1>
-            <p>Read your document one page at a time.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        uploaded = st.file_uploader(
-            "Upload PDF",
-            type=["pdf"],
-            key="reader_upload"
-        )
-
-        if uploaded and st.button("Open PDF"):
-            try:
-                st.session_state.pages = read_pdf(uploaded)
-                st.session_state.pdf_name = uploaded.name
-                st.session_state.audio = None
-                st.success("PDF loaded!")
-            except Exception as error:
-                st.error(f"Unable to read PDF: {error}")
-
-        pages = st.session_state.pages
-
-        if pages:
-            st.success(f"Document: {st.session_state.pdf_name}")
-
-            selected_page = st.selectbox(
-                "Select page",
-                range(1, len(pages) + 1)
+            speech_speed = st.selectbox(
+                "Voice speed",
+                options=["Normal", "Slow"]
             )
 
-            text = pages[selected_page - 1]
+        language_codes = {
+            "English": "en",
+            "Tamil": "ta",
+            "Hindi": "hi",
+            "Telugu": "te",
+            "Malayalam": "ml"
+        }
 
-            st.text_area(
-                "Page Content",
-                value=text,
-                height=350
-            )
+        if st.button("Generate Audio", use_container_width=True):
+            text_to_speak = re.sub(
+                r"\s+",
+                " ",
+                st.session_state.pdf_text
+            ).strip()
 
-            if st.button("🎙️ Convert This Page"):
+            if not text_to_speak:
+                st.error("No text is available to convert.")
+            else:
                 try:
-                    with st.spinner("Generating audio..."):
-                        st.session_state.audio = create_audio(text, "en")
+                    with st.spinner("Generating audio. Please wait..."):
+                        audio_buffer = BytesIO()
 
-                    st.success("Audio generated!")
+                        speech = gTTS(
+                            text=text_to_speak,
+                            lang=language_codes[language],
+                            slow=(speech_speed == "Slow")
+                        )
+
+                        speech.write_to_fp(audio_buffer)
+                        audio_buffer.seek(0)
+
+                        st.session_state.audio_data = audio_buffer.getvalue()
+
+                    st.session_state.history.append({
+                        "language": language,
+                        "words": len(text_to_speak.split())
+                    })
+
+                    st.success("Audio generated successfully.")
 
                 except Exception as error:
-                    st.error(f"Audio error: {error}")
-
-            if st.session_state.audio:
-                show_audio(
-                    st.session_state.audio,
-                    "pdf_page_audio.mp3"
-                )
-
-    # =========================
-    # WORD FINDER
-    # =========================
-
-    elif page == "🔍 Word Finder":
-        st.markdown("""
-        <div class="hero">
-            <h1>🔍 Word Finder</h1>
-            <p>Find a word or phrase in your PDF.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        uploaded = st.file_uploader(
-            "Upload PDF",
-            type=["pdf"],
-            key="search_upload"
-        )
-
-        if uploaded and st.button("Load for Search"):
-            try:
-                st.session_state.pages = read_pdf(uploaded)
-                st.session_state.pdf_name = uploaded.name
-                st.success("PDF ready for searching!")
-            except Exception as error:
-                st.error(f"PDF error: {error}")
-
-        if st.session_state.pages:
-            query = st.text_input("Enter word or phrase")
-
-            if st.button("Search"):
-                if not query.strip():
-                    st.warning("Please enter a word.")
-                else:
-                    found = False
-
-                    for number, text in enumerate(
-                        st.session_state.pages, start=1
-                    ):
-                        matches = list(
-                            re.finditer(
-                                re.escape(query),
-                                text,
-                                re.IGNORECASE
-                            )
-                        )
-
-                        if matches:
-                            found = True
-
-                            with st.expander(
-                                f"📄 Page {number} — "
-                                f"{len(matches)} match(es)"
-                            ):
-                                for match in matches[:3]:
-                                    start = max(0, match.start() - 50)
-                                    end = min(
-                                        len(text),
-                                        match.end() + 80
-                                    )
-
-                                    st.write(
-                                        "…",
-                                        text[start:end].replace("\n", " "),
-                                        "…"
-                                    )
-
-                    if not found:
-                        st.warning("No matches found.")
-
-    # =========================
-    # PDF TO VOICE
-    # =========================
-
-    elif page == "🎙️ PDF to Voice":
-        st.markdown("""
-        <div class="hero">
-            <h1>🎙️ PDF Voice Studio</h1>
-            <p>Turn your PDF into audio.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        uploaded = st.file_uploader(
-            "Upload PDF",
-            type=["pdf"],
-            key="voice_upload"
-        )
-
-        if uploaded and st.button("Extract PDF Text"):
-            try:
-                with st.spinner("Extracting text..."):
-                    st.session_state.pages = read_pdf(uploaded)
-                    st.session_state.pdf_name = uploaded.name
-                    st.session_state.audio = None
-
-                st.success("PDF text extracted!")
-
-            except Exception as error:
-                st.error(f"PDF error: {error}")
-
-        pages = st.session_state.pages
-
-        if pages:
-            st.write(f"📄 File: {st.session_state.pdf_name}")
-
-            mode = st.radio(
-                "Conversion Mode",
-                ["Complete PDF", "Selected Page", "Page Range"]
-            )
-
-            if mode == "Complete PDF":
-                selected_text = "\n".join(pages)
-                filename = "complete_pdf.mp3"
-
-            elif mode == "Selected Page":
-                number = st.selectbox(
-                    "Choose page",
-                    range(1, len(pages) + 1)
-                )
-
-                selected_text = pages[number - 1]
-                filename = f"page_{number}.mp3"
-
-            else:
-                start, end = st.select_slider(
-                    "Choose page range",
-                    options=list(range(1, len(pages) + 1)),
-                    value=(1, len(pages))
-                )
-
-                selected_text = "\n".join(pages[start - 1:end])
-                filename = f"pages_{start}_{end}.mp3"
-
-            languages = {
-                "English": "en",
-                "Tamil": "ta",
-                "Hindi": "hi",
-                "Telugu": "te",
-                "Malayalam": "ml"
-            }
-
-            language_name = st.selectbox(
-                "Voice Language",
-                list(languages.keys())
-            )
-
-            st.caption(
-                "Select the language matching the PDF text. "
-                "This app does not translate the document."
-            )
-
-            st.text_area(
-                "Text Preview",
-                selected_text[:4000],
-                height=150
-            )
-
-            if st.button(
-                "✨ Generate Audio",
-                use_container_width=True
-            ):
-                if not selected_text.strip():
-                    st.warning("No readable text found.")
-                elif len(selected_text) > 40000:
-                    st.warning(
-                        "Please select a smaller page range."
+                    st.session_state.audio_data = None
+                    st.error(
+                        "Audio generation failed. Check your internet connection "
+                        "and try again."
                     )
-                else:
-                    try:
-                        with st.spinner("Creating your audio..."):
-                            audio = create_audio(
-                                selected_text,
-                                languages[language_name]
-                            )
+                    st.code(str(error))
 
-                        st.session_state.audio = audio
+    if st.session_state.audio_data:
+        st.subheader("Generated Audio")
 
-                        st.session_state.history.insert(
-                            0,
-                            {
-                                "file": st.session_state.pdf_name,
-                                "date": datetime.now().strftime(
-                                    "%d-%m-%Y %I:%M %p"
-                                ),
-                                "mode": mode,
-                                "language": language_name
-                            }
-                        )
-
-                        st.success("🎉 Audio is ready!")
-
-                    except Exception as error:
-                        st.error(
-                            f"Audio generation failed: {error}"
-                        )
-
-            if st.session_state.audio:
-                show_audio(
-                    st.session_state.audio,
-                    filename
-                )
-
-    # =========================
-    # PDF SUMMARY
-    # =========================
-
-    elif page == "📝 PDF Summary":
-        st.markdown("""
-        <div class="hero">
-            <h1>📝 PDF Summary</h1>
-            <p>Get a simple summary from your document.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        uploaded = st.file_uploader(
-            "Upload PDF",
-            type=["pdf"],
-            key="summary_upload"
+        st.audio(
+            st.session_state.audio_data,
+            format="audio/mp3"
         )
 
-        if uploaded and st.button("Load for Summary"):
-            try:
-                st.session_state.pages = read_pdf(uploaded)
-                st.session_state.pdf_name = uploaded.name
-                st.session_state.summary = ""
-                st.success("PDF loaded!")
-            except Exception as error:
-                st.error(f"PDF error: {error}")
-
-        if st.session_state.pages:
-            number = st.slider(
-                "Summary sentence count",
-                min_value=3,
-                max_value=15,
-                value=5
-            )
-
-            if st.button("Generate Summary"):
-                text = "\n".join(st.session_state.pages)
-
-                st.session_state.summary = create_summary(
-                    text,
-                    number
-                )
-
-            if st.session_state.summary:
-                st.markdown(
-                    '<div class="card"><h3>✨ Your Summary</h3></div>',
-                    unsafe_allow_html=True
-                )
-
-                st.write(st.session_state.summary)
-
-                st.download_button(
-                    "📥 Download Summary",
-                    data=st.session_state.summary,
-                    file_name="pdf_summary.txt",
-                    mime="text/plain"
-                )
-
-        st.caption(
-            "This basic summary selects the first sentences. "
-            "It is not an AI-generated summary."
+        st.download_button(
+            label="Download MP3 Audio",
+            data=st.session_state.audio_data,
+            file_name="pdf_voice.mp3",
+            mime="audio/mpeg",
+            use_container_width=True
         )
 
-    # =========================
-    # HISTORY
-    # =========================
+# -------------------- PDF READER --------------------
 
-    elif page == "🕘 History":
-        st.markdown("""
-        <div class="hero">
-            <h1>🕘 Conversion History</h1>
-            <p>Review your recent audio conversions.</p>
-        </div>
-        """, unsafe_allow_html=True)
+elif page == "PDF Reader":
+    st.title("PDF Reader")
 
-        if st.session_state.history:
-            for item in st.session_state.history:
-                st.markdown(f"""
-                <div class="card">
-                    <h3>🎧 {html.escape(item['file'])}</h3>
-                    <p>📅 {html.escape(item['date'])}</p>
-                    <p>📄 {html.escape(item['mode'])}</p>
-                    <p>🗣️ {html.escape(item['language'])}</p>
-                </div>
-                """, unsafe_allow_html=True)
+    if st.session_state.pdf_text:
+        st.text_area(
+            "Read extracted PDF text",
+            value=st.session_state.pdf_text,
+            height=400
+        )
+    else:
+        st.info("Go to PDF to Voice and extract text from a PDF first.")
 
-            if st.button("Clear History"):
-                st.session_state.history = []
-                st.rerun()
+# -------------------- TEXT SEARCH --------------------
 
+elif page == "Text Search":
+    st.title("Search in PDF")
+
+    search_word = st.text_input("Enter a word or phrase to search")
+
+    if search_word:
+        if st.session_state.pdf_text:
+            matches = [
+                line for line in st.session_state.pdf_text.splitlines()
+                if search_word.lower() in line.lower()
+            ]
+
+            if matches:
+                st.success(f"Found {len(matches)} matching lines.")
+                for match in matches:
+                    st.write(match)
+            else:
+                st.warning("No matching text found.")
         else:
-            st.info("No conversions yet. Generate audio first.")
+            st.info("Extract PDF text first from the PDF to Voice page.")
+
+# -------------------- HISTORY --------------------
+
+elif page == "History":
+    st.title("Conversion History")
+
+    if st.session_state.history:
+        for number, item in enumerate(
+            reversed(st.session_state.history),
+            start=1
+        ):
+            st.write(
+                f"{number}. Language: {item['language']} | "
+                f"Words: {item['words']}"
+            )
+    else:
+        st.info("No conversions in this session yet.")
+
+# -------------------- FOOTER --------------------
+
+st.sidebar.markdown("---")
+st.sidebar.caption("VocaPDF | PDF Reading and Voice Converter")
 
 
-# =========================
-# START APP
-# =========================
-
-if st.session_state.logged_in:
-    dashboard()
-else:
-    login_page()
+                
