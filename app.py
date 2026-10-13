@@ -1,12 +1,18 @@
 import io
 import re
 import base64
+import asyncio
 from collections import Counter
 
 import streamlit as st
 import streamlit.components.v1 as components
 from pypdf import PdfReader
 from gtts import gTTS
+
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
 
 st.set_page_config(page_title="Smart PDF App", page_icon="📖")
 
@@ -61,6 +67,40 @@ def inject_css(dark=False):
 
 def hero(title, subtitle):
     st.markdown(f'<div class="hero"><h1>{title}</h1><p>{subtitle}</p></div>', unsafe_allow_html=True)
+
+
+
+EDGE_VOICES = {
+    "American": "en-US-AriaNeural",
+    "British": "en-GB-SoniaNeural",
+    "Indian": "en-IN-NeerjaNeural",
+    "Australian": "en-AU-NatashaNeural",
+}
+
+
+def make_audio(text, accent, tld):
+    """Try edge-tts first, then gTTS. Returns MP3 bytes or None."""
+    text = text[:5000]
+    if edge_tts is not None:
+        try:
+            async def run():
+                data = b""
+                comm = edge_tts.Communicate(text, EDGE_VOICES[accent])
+                async for chunk in comm.stream():
+                    if chunk["type"] == "audio":
+                        data += chunk["data"]
+                return data
+            data = asyncio.run(run())
+            if data:
+                return data
+        except Exception:
+            pass
+    try:
+        buf = io.BytesIO()
+        gTTS(text=text[:3000], lang="en", tld=tld).write_to_fp(buf)
+        return buf.getvalue()
+    except Exception:
+        return None
 
 
 # ---------- Login page ----------
@@ -199,12 +239,14 @@ def main_app():
             st.error("No readable text found on these pages")
         else:
             with st.spinner("Creating audio..."):
-                buf = io.BytesIO()
-                gTTS(text=selected, lang="en", tld=voices[voice]).write_to_fp(buf)
-            audio_player(buf.getvalue(), speed)
+                audio_bytes = make_audio(selected, voice, voices[voice])
+            if audio_bytes is None:
+                st.error("Voice service is busy. Please try fewer pages or try again later.")
+                st.stop()
+            audio_player(audio_bytes, speed)
             st.download_button(
                 "⬇️ Download as MP3",
-                data=buf.getvalue(),
+                data=audio_bytes,
                 file_name="smart_pdf_audio.mp3",
                 mime="audio/mpeg",
             )
