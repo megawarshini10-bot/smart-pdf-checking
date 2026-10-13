@@ -1,181 +1,292 @@
-
 import streamlit as st
 import streamlit.components.v1 as components
+
 from pypdf import PdfReader
 from gtts import gTTS
-import io
-import re
-import hashlib
-import base64
 
-# ==================================================
+from io import BytesIO
+from datetime import datetime
+import base64
+import re
+import html
+
+
+# ==========================================
 # PAGE CONFIGURATION
-# ==================================================
+# ==========================================
 
 st.set_page_config(
-    page_title="Smart PDF Voice Studio",
+    page_title="VocaPDF | Smart PDF Voice",
     page_icon="🎧",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-LANGUAGES = {
-    "English": "en",
-    "Tamil": "ta",
-    "Hindi": "hi",
-    "Telugu": "te",
-    "Malayalam": "ml"
-}
 
-# Demo accounts only
-USERS = {
-    "admin": hashlib.sha256(b"1234").hexdigest(),
-    "student": hashlib.sha256(b"pdf123").hexdigest()
-}
-
-# ==================================================
+# ==========================================
 # SESSION STATE
-# ==================================================
+# ==========================================
 
 defaults = {
     "logged_in": False,
     "username": "",
-    "pages": [],
-    "pdf_id": "",
-    "selected_page": 1,
-    "search_results": None,
-    "search_word": "",
-    "audio_data": None,
+    "pdf_text": "",
+    "pdf_pages": [],
+    "pdf_name": "",
+    "audio_bytes": None,
     "audio_name": "pdf_voice.mp3",
-    "font_size": 17,
-    "dark_mode": True
+    "history": [],
+    "dark_mode": False,
+    "last_search": "",
+    "last_matches": []
 }
 
 for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ==================================================
-# DESIGN
-# ==================================================
+
+# ==========================================
+# COLORFUL CSS DESIGN
+# ==========================================
 
 st.markdown("""
 <style>
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Poppins', sans-serif;
+}
+
+.stApp {
+    background:
+        radial-gradient(
+            circle at 0% 0%,
+            rgba(128, 90, 255, 0.12),
+            transparent 35%
+        ),
+        radial-gradient(
+            circle at 100% 10%,
+            rgba(0, 210, 255, 0.12),
+            transparent 30%
+        ),
+        linear-gradient(135deg, #f7f7ff, #eef5ff, #fff3fa);
+}
+
 .block-container {
-    max-width: 1250px;
     padding-top: 2rem;
+    padding-bottom: 3rem;
+    max-width: 1250px;
 }
-.stButton > button {
-    width: 100%;
-    border-radius: 10px;
-    min-height: 42px;
-    font-weight: 600;
+
+.hero {
+    padding: 36px;
+    border-radius: 28px;
+    color: white;
+    background: linear-gradient(
+        120deg,
+        #6558f5,
+        #a34dff,
+        #ed61c5
+    );
+    box-shadow: 0 15px 35px rgba(112, 80, 220, 0.22);
+    margin-bottom: 28px;
 }
-div[data-testid="stMetric"] {
-    background: #17233f;
-    padding: 16px;
-    border-radius: 12px;
-    border: 1px solid #334155;
+
+.hero h1 {
+    color: white;
+    font-size: 38px;
+    font-weight: 800;
 }
+
+.hero p {
+    color: #f4f0ff;
+    font-size: 16px;
+}
+
+.section-title {
+    font-size: 25px;
+    font-weight: 800;
+    color: #4338a8;
+    margin: 20px 0 12px 0;
+}
+
+.feature-card {
+    background: rgba(255,255,255,0.92);
+    border: 1px solid #e8e5ff;
+    border-radius: 22px;
+    padding: 22px;
+    min-height: 145px;
+    box-shadow: 0 8px 25px rgba(63, 55, 130, 0.07);
+    margin-bottom: 15px;
+}
+
+.feature-icon {
+    font-size: 34px;
+}
+
+.feature-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: #42358d;
+    margin-top: 8px;
+}
+
+.feature-text {
+    font-size: 13px;
+    color: #72718a;
+}
+
 .login-box {
-    background: #17233f;
-    padding: 25px;
-    border-radius: 18px;
-    border: 1px solid #334155;
+    background: rgba(255,255,255,0.96);
+    border-radius: 28px;
+    padding: 32px;
+    box-shadow: 0 15px 45px rgba(75, 60, 160, 0.13);
+    border: 1px solid #e8e4ff;
 }
+
+.info-card {
+    background: linear-gradient(135deg, #ffffff, #f0edff);
+    border-radius: 20px;
+    padding: 22px;
+    border: 1px solid #e5ddff;
+    box-shadow: 0 6px 18px rgba(80, 60, 150, 0.06);
+}
+
+.info-number {
+    color: #7055ee;
+    font-size: 28px;
+    font-weight: 800;
+}
+
+.info-label {
+    color: #77728d;
+    font-size: 13px;
+}
+
+.stButton > button {
+    border-radius: 13px;
+    border: none;
+    font-weight: 600;
+    padding: 10px 18px;
+    background: linear-gradient(100deg, #6558f5, #bd55e8);
+    color: white;
+    transition: 0.2s;
+}
+
+.stButton > button:hover {
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 7px 18px rgba(101, 88, 245, 0.22);
+}
+
+.stTextInput input,
+.stTextArea textarea {
+    border-radius: 12px;
+}
+
+div[data-testid="stFileUploader"] {
+    border-radius: 18px;
+    padding: 10px;
+    background: rgba(255,255,255,0.7);
+}
+
+div[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #eeebff, #f9efff);
+}
+
+.small-note {
+    font-size: 12px;
+    color: #77728d;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-# ==================================================
-# LOGIN PAGE
-# ==================================================
 
-def login_page():
-    st.markdown(
-        "<h1 style='text-align:center'>🎧 Smart PDF Voice Studio</h1>"
-        "<p style='text-align:center'>"
-        "Read PDFs and listen to them with ease</p>",
-        unsafe_allow_html=True
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+def extract_pdf(uploaded_file):
+    reader = PdfReader(uploaded_file)
+
+    pages = []
+
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        pages.append(text)
+
+    return pages
+
+
+def make_audio(text, language="en"):
+    text = text.strip()
+
+    if not text:
+        raise ValueError("No readable text was found.")
+
+    audio_buffer = BytesIO()
+
+    tts = gTTS(
+        text=text,
+        lang=language,
+        slow=False
     )
 
-    left, center, right = st.columns([1, 1.2, 1])
+    tts.write_to_fp(audio_buffer)
+    audio_buffer.seek(0)
 
-    with center:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.subheader("🔐 Login")
-        st.write("Enter your account details.")
-
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input(
-                "Password",
-                type="password"
-            )
-
-            submit = st.form_submit_button(
-                "Login",
-                use_container_width=True
-            )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        if submit:
-            username = username.strip()
-            saved_password = USERS.get(username)
-            entered_password = hashlib.sha256(
-                password.encode()
-            ).hexdigest()
-
-            if saved_password and saved_password == entered_password:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.rerun()
-            else:
-                st.error("Incorrect username or password.")
-
-        st.caption("Demo: admin / 1234")
-        st.caption("Demo: student / pdf123")
+    return audio_buffer.getvalue()
 
 
-# ==================================================
-# PDF EXTRACTION
-# ==================================================
+def make_summary(text, sentence_count=5):
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
 
-def extract_pdf(file):
-    reader = PdfReader(file)
-    return [
-        page.extract_text() or ""
-        for page in reader.pages
+    sentences = [
+        sentence.strip()
+        for sentence in sentences
+        if sentence.strip()
     ]
 
+    if not sentences:
+        return "No readable text is available for summary."
 
-# ==================================================
-# WORD SEARCH
-# ==================================================
+    return " ".join(sentences[:sentence_count])
 
-def search_pdf(word, pages):
+
+def search_pdf(query, pages):
     results = []
 
-    if not word.strip():
+    query = query.strip()
+
+    if not query:
         return results
 
-    pattern = re.compile(
-        re.escape(word.strip()),
-        re.IGNORECASE
-    )
+    for page_number, page_text in enumerate(pages, start=1):
 
-    for page_no, page_text in enumerate(pages, start=1):
-        matches = list(pattern.finditer(page_text))
+        matches = list(
+            re.finditer(
+                re.escape(query),
+                page_text,
+                re.IGNORECASE
+            )
+        )
 
         if matches:
             snippets = []
 
-            for match in matches[:5]:
-                start = max(0, match.start() - 60)
+            for match in matches[:3]:
+                start = max(0, match.start() - 65)
                 end = min(len(page_text), match.end() + 100)
-                snippets.append(page_text[start:end])
+
+                snippet = page_text[start:end].replace("\n", " ")
+
+                snippets.append(snippet)
 
             results.append({
-                "page": page_no,
+                "page": page_number,
                 "count": len(matches),
                 "snippets": snippets
             })
@@ -183,442 +294,563 @@ def search_pdf(word, pages):
     return results
 
 
-# ==================================================
-# TEXT TO SPEECH
-# ==================================================
+def audio_player(audio_bytes, filename="pdf_voice.mp3"):
 
-def convert_to_audio(text, language):
-    if not text.strip():
-        raise ValueError("No readable text available.")
+    encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
 
-    output = io.BytesIO()
+    safe_filename = re.sub(
+        r"[^a-zA-Z0-9_.-]",
+        "_",
+        filename
+    )
 
-    # Split long text into smaller parts.
-    chunks = [
-        text[i:i + 2500]
-        for i in range(0, len(text), 2500)
-    ]
-
-    for chunk in chunks:
-        speech = gTTS(
-            text=chunk,
-            lang=LANGUAGES[language],
-            slow=False
-        )
-        speech.write_to_fp(output)
-
-    output.seek(0)
-    return output.getvalue()
-
-
-# ==================================================
-# AUDIO PLAYER WITH VOLUME AND SPEED
-# ==================================================
-
-def audio_player(audio_bytes):
-    encoded = base64.b64encode(audio_bytes).decode("utf-8")
-
-    html = f"""
+    player_html = f"""
     <div style="
-        background:#17233f;
-        padding:20px;
-        border-radius:15px;
-        color:white;
-        font-family:Arial;
+        background: linear-gradient(135deg, #f2edff, #fff0fa);
+        border: 1px solid #ded4ff;
+        border-radius: 20px;
+        padding: 22px;
+        font-family: Arial, sans-serif;
     ">
-        <h3>🎧 Audio Player</h3>
 
-        <audio id="audioPlayer" controls style="width:100%">
+        <div style="
+            font-size: 20px;
+            font-weight: bold;
+            color: #5140b8;
+            margin-bottom: 15px;
+        ">
+            🎧 Your Audio Player
+        </div>
+
+        <audio id="audio" controls
+            style="width:100%; margin-bottom:15px;">
             <source
-                src="data:audio/mp3;base64,{encoded}"
+                src="data:audio/mpeg;base64,{encoded_audio}"
                 type="audio/mpeg">
+            Your browser does not support audio playback.
         </audio>
 
-        <br><br>
+        <div style="margin:12px 0;">
+            <label style="font-weight:bold;color:#5140b8;">
+                🔊 Volume
+            </label>
 
-        <label>🔊 Volume:
+            <input
+                id="volume"
+                type="range"
+                min="0"
+                max="100"
+                value="100"
+                style="width:100%;"
+                oninput="changeVolume(this.value)">
             <span id="volumeLabel">100%</span>
-        </label>
-        <input id="volume" type="range"
-            min="0" max="100" value="100"
-            style="width:100%">
+        </div>
 
-        <br><br>
+        <div style="margin:12px 0;">
+            <label style="font-weight:bold;color:#5140b8;">
+                ⏩ Playback Speed
+            </label>
 
-        <label>⏩ Playback Speed:
-            <span id="speedLabel">1x</span>
-        </label>
-        <input id="speed" type="range"
-            min="0.5" max="2" step="0.25" value="1"
-            style="width:100%">
+            <select
+                id="speed"
+                onchange="changeSpeed(this.value)"
+                style="
+                    padding:9px;
+                    border-radius:9px;
+                    border:1px solid #c9bfff;
+                    margin-left:10px;
+                ">
 
-        <p style="color:#cbd5e1;font-size:13px">
-            Adjust the controls while listening.
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x Normal</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="1.75">1.75x</option>
+                <option value="2">2x</option>
+
+            </select>
+        </div>
+
+        <p style="color:#77718d;font-size:12px;">
+            Use the audio controls to play, pause, seek and replay.
         </p>
+
+        <a
+            download="{html.escape(safe_filename, quote=True)}"
+            href="data:audio/mpeg;base64,{encoded_audio}"
+            style="
+                display:inline-block;
+                background:linear-gradient(100deg,#6558f5,#bd55e8);
+                color:white;
+                text-decoration:none;
+                padding:11px 18px;
+                border-radius:11px;
+                font-weight:bold;
+            ">
+            📥 Download Audio
+        </a>
+
     </div>
 
     <script>
-        const player = document.getElementById("audioPlayer");
-        const volume = document.getElementById("volume");
-        const speed = document.getElementById("speed");
 
-        volume.addEventListener("input", function() {{
-            player.volume = Number(this.value) / 100;
-            document.getElementById("volumeLabel").textContent =
-                this.value + "%";
-        }});
+    const audio = document.getElementById("audio");
 
-        speed.addEventListener("input", function() {{
-            player.playbackRate = Number(this.value);
-            document.getElementById("speedLabel").textContent =
-                this.value + "x";
-        }});
+    function changeVolume(value) {{
+        audio.volume = Number(value) / 100;
+
+        document.getElementById("volumeLabel").innerText =
+            value + "%";
+    }}
+
+    function changeSpeed(value) {{
+        audio.playbackRate = Number(value);
+    }}
+
     </script>
     """
 
-    components.html(html, height=310)
+    components.html(
+        player_html,
+        height=390,
+        scrolling=False
+    )
 
 
-# ==================================================
-# MAIN DASHBOARD
-# ==================================================
+# ==========================================
+# LOGIN PAGE
+# ==========================================
 
-def dashboard():
+def show_login():
+
+    left, right = st.columns([1.1, 1])
+
+    with left:
+
+        st.markdown("""
+        <div class="hero" style="margin-top:35px; min-height:380px;">
+
+            <div style="font-size:65px;">🎧📚</div>
+
+            <h1>VocaPDF</h1>
+
+            <p style="font-size:20px;">
+                Turn your PDF into an audio experience.
+            </p>
+
+            <hr style="border-color:rgba(255,255,255,0.3);">
+
+            <p>✨ Listen to your documents</p>
+            <p>🔍 Find words in seconds</p>
+            <p>🎵 Control your listening experience</p>
+            <p>📖 Read one page or your complete PDF</p>
+
+        </div>
+        """, unsafe_allow_html=True)
+
+    with right:
+
+        st.markdown("<br><br>", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="login-box">
+
+            <div style="font-size:42px;">💜</div>
+
+            <h2 style="color:#5140b8;">
+                Welcome Back!
+            </h2>
+
+            <p style="color:#77718d;">
+                Login to explore your smart PDF workspace.
+            </p>
+
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.form("login_form"):
+
+            username = st.text_input(
+                "👤 Username",
+                placeholder="Enter your username"
+            )
+
+            password = st.text_input(
+                "🔒 Password",
+                type="password",
+                placeholder="Enter your password"
+            )
+
+            submitted = st.form_submit_button(
+                "✨ Login to VocaPDF",
+                use_container_width=True
+            )
+
+            if submitted:
+
+                # DEMO LOGIN:
+                # Username: student
+                # Password: pdf123
+
+                if username == "student" and password == "pdf123":
+
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+
+                    st.success("Login successful!")
+
+                    st.rerun()
+
+                else:
+                    st.error(
+                        "Incorrect username or password. "
+                        "Please try again."
+                    )
+
+        st.caption(
+            "Demo login: student  |  Password: pdf123"
+        )
+
+        st.caption(
+            "This is a demonstration login, not a production "
+            "authentication system."
+        )
+
+
+# ==========================================
+# DASHBOARD
+# ==========================================
+
+def show_dashboard():
+
     with st.sidebar:
-        st.title("🎧 PDF Studio")
-        st.write("User:", st.session_state.username)
-        st.divider()
 
-        st.session_state.dark_mode = st.toggle(
-            "Dark Mode",
-            value=st.session_state.dark_mode
+        st.markdown("# 🎧 VocaPDF")
+
+        st.markdown("---")
+
+        st.markdown(
+            f"### 👋 Hi, {st.session_state.username}!"
         )
 
-        st.session_state.font_size = st.slider(
-            "Reading Font Size",
-            min_value=12,
-            max_value=28,
-            value=st.session_state.font_size
+        st.toggle(
+            "🌙 Dark Mode",
+            key="dark_mode"
         )
 
-        st.divider()
+        st.markdown("---")
 
-        if st.button("🚪 Logout"):
+        menu = st.radio(
+            "YOUR WORKSPACE",
+            [
+                "🏠 Dashboard",
+                "📄 PDF Reader",
+                "🔍 Word Finder",
+                "🎙️ PDF to Voice",
+                "📝 PDF Summary",
+                "🕘 History"
+            ]
+        )
+
+        st.markdown("---")
+
+        if st.button(
+            "🚪 Logout",
+            use_container_width=True
+        ):
+
             st.session_state.logged_in = False
             st.session_state.username = ""
+
             st.rerun()
 
-    if not st.session_state.dark_mode:
+    # Dark mode colors
+    if st.session_state.dark_mode:
+
         st.markdown("""
         <style>
-        .stApp {background:#f5f7fb;color:#172033;}
-        h1,h2,h3,p,label {color:#172033;}
-        div[data-testid="stMetric"] {background:white;}
+        .stApp {
+            background: linear-gradient(135deg,#17162a,#24203b);
+            color: #f5f2ff;
+        }
+
+        .section-title {
+            color: #c6baff;
+        }
+
+        .feature-card {
+            background: #292541;
+            border-color: #49416d;
+        }
+
+        .feature-title {
+            color: #e2d9ff;
+        }
+
+        .feature-text {
+            color: #d0c9e5;
+        }
+
+        div[data-testid="stSidebar"] {
+            background: #211e35;
+        }
+
         </style>
         """, unsafe_allow_html=True)
 
-    st.title("📚 Smart PDF Voice Studio")
-    st.write(
-        "Upload, read, search, and listen to your PDF."
-    )
+    # --------------------------------------
+    # DASHBOARD HOME
+    # --------------------------------------
 
-    # ---------------- UPLOAD ----------------
+    if menu == "🏠 Dashboard":
 
-    uploaded = st.file_uploader(
-        "📄 Upload PDF",
-        type=["pdf"]
-    )
+        st.markdown("""
+        <div class="hero">
 
-    if uploaded is None:
-        st.info("Upload a PDF to start using the features.")
+            <h1>Welcome to Your Smart Workspace! 💜</h1>
+
+            <p>
+                Read PDFs, discover important words and listen
+                to your documents with your own audio settings.
+            </p>
+
+        </div>
+        """, unsafe_allow_html=True)
 
         c1, c2, c3 = st.columns(3)
-        c1.subheader("🔍 Word Search")
-        c2.subheader("📖 PDF Reader")
-        c3.subheader("🎧 Voice Studio")
 
-        c1.write("Find words and their page numbers.")
-        c2.write("Read pages and download extracted text.")
-        c3.write("Listen with adjustable speed and volume.")
-        return
+        with c1:
+            st.markdown("""
+            <div class="info-card">
+                <div class="info-number">📄</div>
+                <div class="info-label">Smart PDF Reader</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    current_id = f"{uploaded.name}_{uploaded.size}"
+        with c2:
+            st.markdown("""
+            <div class="info-card">
+                <div class="info-number">🔍</div>
+                <div class="info-label">Word & Page Finder</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    if st.session_state.pdf_id != current_id:
-        try:
-            with st.spinner("Reading PDF..."):
-                st.session_state.pages = extract_pdf(uploaded)
-                st.session_state.pdf_id = current_id
-                st.session_state.selected_page = 1
-                st.session_state.search_results = None
-                st.session_state.audio_data = None
-        except Exception as error:
-            st.error(f"PDF error: {error}")
-            return
-
-    pages = st.session_state.pages
-
-    if not pages:
-        st.error("No pages found.")
-        return
-
-    full_text = "\n\n".join(pages)
-    total_pages = len(pages)
-
-    if not full_text.strip():
-        st.warning(
-            "No selectable text found. Scanned PDFs require OCR."
-        )
-        return
-
-    # ---------------- OVERVIEW ----------------
-
-    st.success(f"Loaded: {uploaded.name}")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("📄 Pages", total_pages)
-    col2.metric("📝 Words", len(full_text.split()))
-    col3.metric("🔤 Characters", len(full_text))
-    col4.metric(
-        "⏱️ Reading Time",
-        f"{max(1, len(full_text.split()) // 200)} min"
-    )
-
-    st.progress(
-        min(st.session_state.selected_page / total_pages, 1.0),
-        text="Reading progress"
-    )
-
-    st.divider()
-
-    reader_tab, search_tab, voice_tab, tools_tab = st.tabs([
-        "📖 PDF Reader",
-        "🔍 Word Search",
-        "🎧 Voice Studio",
-        "🛠️ Text Tools"
-    ])
-
-    # ---------------- READER TAB ----------------
-
-    with reader_tab:
-        st.subheader("📖 Read PDF Page")
-
-        page_no = st.number_input(
-            "Select page",
-            min_value=1,
-            max_value=total_pages,
-            value=min(
-                max(1, int(st.session_state.selected_page)),
-                total_pages
-            ),
-            step=1
-        )
-
-        page_no = int(page_no)
-        st.session_state.selected_page = page_no
-        page_text = pages[page_no - 1]
+        with c3:
+            st.markdown("""
+            <div class="info-card">
+                <div class="info-number">🎧</div>
+                <div class="info-label">Audio Experience</div>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown(
-            f"**Page {page_no} of {total_pages}**"
+            '<div class="section-title">✨ Explore Features</div>',
+            unsafe_allow_html=True
         )
 
-        st.text_area(
-            "Page Text",
-            value=page_text,
-            height=300,
-            key=f"reader_page_{page_no}"
+        features = [
+            ("📄", "PDF Reader", "Upload and read PDF documents."),
+            ("🔍", "Word Finder", "Find words and matching pages."),
+            ("🎙️", "PDF to Voice", "Convert document text to audio."),
+            ("🎚️", "Audio Controls", "Adjust volume and playback speed."),
+            ("📝", "Quick Summary", "Create a basic text summary."),
+            ("🕘", "History", "View previous conversion activities.")
+        ]
+
+        columns = st.columns(3)
+
+        for index, feature in enumerate(features):
+
+            with columns[index % 3]:
+
+                st.markdown(f"""
+                <div class="feature-card">
+
+                    <div class="feature-icon">
+                        {feature[0]}
+                    </div>
+
+                    <div class="feature-title">
+                        {feature[1]}
+                    </div>
+
+                    <div class="feature-text">
+                        {feature[2]}
+                    </div>
+
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.info(
+            "👈 Choose a feature from the sidebar to get started."
         )
 
-        st.download_button(
-            "⬇️ Download This Page",
-            data=page_text,
-            file_name=f"page_{page_no}.txt",
-            mime="text/plain"
+        st.markdown(
+            '<div class="section-title">📂 Upload Your PDF</div>',
+            unsafe_allow_html=True
         )
 
-        st.caption(
-            f"Words on this page: {len(page_text.split())}"
+        uploaded_file = st.file_uploader(
+            "Choose a PDF document",
+            type=["pdf"],
+            key="home_pdf_upload"
         )
 
-        if st.button("📖 Add Page to Reading History"):
-            history = st.session_state.get("reading_history", [])
-            if page_no not in history:
-                history.append(page_no)
-            st.session_state.reading_history = history
-            st.success("Page added to reading history.")
+        if uploaded_file:
 
-        history = st.session_state.get("reading_history", [])
-        if history:
-            st.write(
-                "Reading history: " +
-                ", ".join(str(n) for n in history)
-            )
+            if st.button("📥 Load PDF", key="home_load"):
 
-    # ---------------- SEARCH TAB ----------------
-
-    with search_tab:
-        st.subheader("🔍 Search Word in PDF")
-
-        word = st.text_input(
-            "Enter a word or phrase",
-            key="search_input"
-        )
-
-        if st.button("Search PDF", key="search_button"):
-            if word.strip():
-                st.session_state.search_results = search_pdf(
-                    word, pages
-                )
-                st.session_state.search_word = word.strip()
-            else:
-                st.warning("Enter a word to search.")
-
-        results = st.session_state.search_results
-
-        if results is not None:
-            if results:
-                total_matches = sum(
-                    item["count"] for item in results
-                )
-
-                st.success(
-                    f"'{st.session_state.search_word}' found on "
-                    f"{len(results)} page(s), "
-                    f"{total_matches} time(s)."
-                )
-
-                for result in results:
-                    with st.expander(
-                        f"Page {result['page']} — "
-                        f"{result['count']} occurrence(s)"
-                    ):
-                        for snippet in result["snippets"]:
-                            st.write(f"...{snippet}...")
-
-                        if st.button(
-                            f"Open Page {result['page']}",
-                            key=f"open_page_{result['page']}"
-                        ):
-                            st.session_state.selected_page = result["page"]
-                            st.rerun()
-            else:
-                st.warning("Word not found.")
-
-    # ---------------- VOICE TAB ----------------
-
-    with voice_tab:
-        st.subheader("🎧 Voice Studio")
-
-        language = st.selectbox(
-            "Choose voice language",
-            list(LANGUAGES.keys()),
-            key="voice_language"
-        )
-
-        choice = st.radio(
-            "What should be converted?",
-            ["Selected Page", "Entire PDF"],
-            horizontal=True
-        )
-
-        if choice == "Selected Page":
-            text_to_speak = pages[
-                st.session_state.selected_page - 1
-            ]
-            audio_filename = (
-                f"page_{st.session_state.selected_page}.mp3"
-            )
-        else:
-            text_to_speak = full_text
-            audio_filename = "complete_pdf_voice.mp3"
-
-        st.caption(
-            "Audio generation needs an internet connection."
-        )
-
-        if st.button("🎙️ Generate Voice", key="generate_voice"):
-            if not text_to_speak.strip():
-                st.error("No readable text on this selection.")
-            else:
                 try:
-                    with st.spinner("Generating audio..."):
-                        audio_data = convert_to_audio(
-                            text_to_speak,
-                            language
-                        )
 
-                    st.session_state.audio_data = audio_data
-                    st.session_state.audio_name = audio_filename
-                    st.success("Audio generated successfully!")
+                    with st.spinner("Reading your PDF..."):
+
+                        pages = extract_pdf(uploaded_file)
+
+                    st.session_state.pdf_pages = pages
+
+                    st.session_state.pdf_text = "\n".join(pages)
+
+                    st.session_state.pdf_name = uploaded_file.name
+
+                    st.session_state.audio_bytes = None
+
+                    st.success(
+                        f"Loaded {uploaded_file.name} successfully!"
+                    )
+
+                    st.rerun()
 
                 except Exception as error:
-                    st.error(
-                        "Could not generate audio. Check your internet "
-                        "connection and selected language."
-                    )
-                    st.caption(str(error))
 
-        if st.session_state.audio_data:
-            st.subheader("🔊 Listen and Adjust")
+                    st.error(f"Could not read this PDF: {error}")
 
-            audio_player(st.session_state.audio_data)
+    # --------------------------------------
+    # PDF READER
+    # --------------------------------------
 
-            st.download_button(
-                "⬇️ Download MP3",
-                data=st.session_state.audio_data,
-                file_name=st.session_state.audio_name,
-                mime="audio/mpeg",
-                key="download_mp3"
+    elif menu == "📄 PDF Reader":
+
+        st.markdown(
+            '<div class="section-title">📖 Smart PDF Reader</div>',
+            unsafe_allow_html=True
+        )
+
+        uploaded_file = st.file_uploader(
+            "Upload a PDF",
+            type=["pdf"],
+            key="reader_upload"
+        )
+
+        if uploaded_file:
+
+            if st.button("📂 Open PDF"):
+
+                try:
+
+                    with st.spinner("Extracting PDF text..."):
+
+                        pages = extract_pdf(uploaded_file)
+
+                    st.session_state.pdf_pages = pages
+
+                    st.session_state.pdf_text = "\n".join(pages)
+
+                    st.session_state.pdf_name = uploaded_file.name
+
+                    st.session_state.audio_bytes = None
+
+                    st.success("PDF loaded successfully!")
+
+                except Exception as error:
+
+                    st.error(f"PDF error: {error}")
+
+        pages = st.session_state.pdf_pages
+
+        if pages:
+
+            st.success(
+                f"📄 {st.session_state.pdf_name} | "
+                f"{len(pages)} pages"
             )
 
-    # ---------------- TEXT TOOLS TAB ----------------
+            selected_page = st.selectbox(
+                "Select page",
+                options=list(range(1, len(pages) + 1))
+            )
 
-    with tools_tab:
-        st.subheader("🛠️ Text Tools")
+            page_text = pages[selected_page - 1]
 
-        st.metric(
-            "Total Sentences",
-            len(re.findall(r"[.!?]+", full_text))
+            st.text_area(
+                f"Page {selected_page} Text",
+                value=page_text,
+                height=400
+            )
+
+            st.caption(
+                f"Characters on this page: {len(page_text)}"
+            )
+
+            if st.button("🎙️ Convert This Page to Voice"):
+
+                if not page_text.strip():
+
+                    st.warning("This page has no extractable text.")
+
+                else:
+
+                    try:
+
+                        with st.spinner("Creating audio..."):
+
+                            audio = make_audio(page_text, "en")
+
+                        st.session_state.audio_bytes = audio
+
+                        st.session_state.audio_name = (
+                            f"page_{selected_page}_voice.mp3"
+                        )
+
+                        st.success("Audio is ready!")
+
+                    except Exception as error:
+
+                        st.error(f"Audio conversion failed: {error}")
+
+            if st.session_state.audio_bytes:
+
+                audio_player(
+                    st.session_state.audio_bytes,
+                    st.session_state.audio_name
+                )
+
+        else:
+
+            st.info("Upload a PDF to start reading.")
+
+
+    # --------------------------------------
+    # WORD FINDER
+    # --------------------------------------
+
+    elif menu == "🔍 Word Finder":
+
+        st.markdown(
+            '<div class="section-title">🔎 Find Words in Your PDF</div>',
+            unsafe_allow_html=True
         )
 
-        st.metric(
-            "Average Words per Page",
-            round(len(full_text.split()) / total_pages, 1)
+        uploaded_file = st.file_uploader(
+            "Upload a PDF",
+            type=["pdf"],
+            key="finder_upload"
         )
 
-        st.download_button(
-            "⬇️ Download Complete PDF Text",
-            data=full_text,
-            file_name="complete_pdf_text.txt",
-            mime="text/plain"
-        )
+        if uploaded_file:
 
-        st.subheader("📋 Copy / View Complete Text")
-        st.text_area(
-            "Complete PDF text",
-            value=full_text,
-            height=300,
-            key="all_pdf_text"
-        )
+            if st.button("Load PDF", key="finder_load"):
 
-        st.subheader("📝 Text Preview")
-        st.write(
-            full_text[:1500] +
-            ("..." if len(full_text) > 1500 else "")
-        )
+                try:
 
-    st.divider()
-    st.caption(
-        "Smart PDF Voice Studio | PDF reading and text-to-speech app"
-    )
-
-
-# ==================================================
-# APPLICATION ENTRY POINT
-# ==================================================
-
-if st.session_state.logged_in:
-    dashboard()
-else:
-    login_page()
+                    pages = extract_pdf(uploaded_file)
