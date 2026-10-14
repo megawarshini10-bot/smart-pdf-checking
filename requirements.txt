@@ -1,0 +1,5 @@
+streamlit
+pypdf
+gTTS
+pytesseract
+pypdfium2
