@@ -13,6 +13,48 @@ from gtts import gTTS
 
 st.set_page_config(page_title="Smart PDF App", page_icon="📖", layout="centered")
 
+# ---------- Login ----------
+# Demo login only. For a public/production app, use secure authentication
+# and store passwords/secrets outside the source code.
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.markdown("""
+    <style>
+    .login-card {
+        max-width: 480px; margin: 30px auto; padding: 28px 24px;
+        border-radius: 20px; text-align: center;
+        background: linear-gradient(120deg, #4f7de0, #e0559c, #f0a020);
+        color: white;
+    }
+    .login-card h1 { color: #3a1450; margin-bottom: 6px; }
+    .login-card p { color: white; margin-top: 0; }
+    </style>
+    <div class="login-card">
+      <h1>📖 Smart PDF App</h1>
+      <p>Login to upload a PDF and listen to it as voice</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login", use_container_width=True)
+
+    if submitted:
+        if username == "admin" and password == "1234":
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("Incorrect username or password. Please try again.")
+    st.stop()
+
+# Show logout control after successful login
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.rerun()
+
 # ---------- Styling ----------
 BASE_CSS = """
 <style>
